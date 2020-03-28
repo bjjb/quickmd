@@ -1,9 +1,9 @@
 //! The GTK user interface.
 
 use std::path::PathBuf;
+use std::ffi::OsStr;
 
 use anyhow::anyhow;
-use gdk::enums::key;
 use gtk::prelude::*;
 use gtk::{Window, WindowType};
 use log::{debug, warn};
@@ -30,6 +30,7 @@ pub struct App {
     window: Window,
     webview: WebView,
     assets: Assets,
+    filename: PathBuf,
 }
 
 impl App {
@@ -53,7 +54,7 @@ impl App {
 
         let assets = Assets::init()?;
 
-        Ok(App { window, webview, assets })
+        Ok(App { window, webview, assets, filename })
     }
 
     /// Start listening to events from the `ui_receiver` and trigger the relevant methods on the
@@ -103,12 +104,27 @@ impl App {
     fn connect_events(&self) {
         use std::cell::RefCell;
         let self_clone = RefCell::new(Some(self.clone()));
+        let filename_string = self.filename.clone().into_os_string();
 
-        // Each key press will invoke this function.
-        self.window.connect_key_press_event(move |_window, gdk| {
-            if let key::Escape = gdk.get_keyval() {
-                self_clone.borrow_mut().take().unwrap().assets.delete();
-                gtk::main_quit()
+        self.window.connect_key_press_event(move |_window, event| {
+            use gdk::enums::key;
+            use gdk::ModifierType;
+
+            let keyval   = event.get_keyval();
+            let keystate = event.get_state();
+
+            match (keystate, keyval) {
+                // Escape:
+                (_, key::Escape) =>  {
+                    // Escape
+                    self_clone.borrow_mut().take().unwrap().assets.delete();
+                    gtk::main_quit()
+                },
+                // Ctrl + e:
+                (ModifierType::CONTROL_MASK, key::e) => {
+                    exec_editor(&filename_string);
+                },
+                _ => (),
             }
             Inhibit(false)
         });
@@ -118,4 +134,21 @@ impl App {
             Inhibit(false)
         });
     }
+}
+
+#[cfg(target_family="unix")]
+fn exec_editor(filename_string: &OsStr) {
+    gtk::main_quit();
+
+    use std::process::Command;
+    use std::os::unix::process::CommandExt;
+
+    Command::new("gvim").
+        args(&[filename_string]).
+        exec();
+}
+
+#[cfg(not(target_family="unix"))]
+fn exec_editor(_filename_string: &OsStr) {
+    warn!("Not on a UNIX system, can't exec to a text editor");
 }
